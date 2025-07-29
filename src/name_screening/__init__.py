@@ -1,0 +1,1 @@
+"""Name Screening Tool - A tool for matching names in articles to individuals of interest."""

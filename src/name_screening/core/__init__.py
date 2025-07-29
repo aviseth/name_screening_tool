@@ -1,0 +1,1 @@
+"""Core matching and extraction functionality."""

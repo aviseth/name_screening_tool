@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "name_screening"
+version = "0.1.0"
+description = "An explainable CLI tool for matching names in news articles to individuals of interest"
+authors = ["Avi Seth  <avi.seth8@gmail.com>"]
+readme = "README.md"
+packages = [{include = "name_screening", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+typer = "^0.9.0"
+pydantic = "^2.5.0"
+spacy = "^3.7.0"
+textdistance = "^4.6.0"
+pynamematcher = "^0.1.0"
+pandas = "^2.1.0"
+rich = "^13.7.0"
+flask = "^3.0.0"
+google-generativeai = "^0.3.0"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+black = "^23.12.0"
+ruff = "^0.1.0"
+mypy = "^1.7.0"
+
+[tool.poetry.scripts]
+name_screening = "name_screening.main:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "N", "UP", "S", "B", "A", "C4", "PT", "Q"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

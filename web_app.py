@@ -1,0 +1,763 @@
+#!/usr/bin/env python3
+"""
+Web application for the Name Screening Tool.
+Provides a user-friendly interface for screening names against articles.
+"""
+
+import json
+import os
+from pathlib import Path
+from typing import Optional
+
+from flask import Flask, render_template, request, jsonify
+from pydantic import ValidationError
+
+# Add src to path
+import sys
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from name_screening.core.entity_extractor import EntityExtractor
+from name_screening.core.matcher import NameMatcher
+from name_screening.models.matching import MatchRequest
+
+
+app = Flask(__name__)
+
+# Initialize components
+entity_extractor = EntityExtractor()
+
+
+@app.route("/")
+def index():
+    """Render the main page."""
+    return render_template("index.html")
+
+
+@app.route("/api/screen", methods=["POST"])
+def screen_name():
+    """Screen a name against article text."""
+    try:
+        # Get request data
+        data = request.get_json()
+        
+        # Get options with defaults
+        use_llm = data.get('use_llm', False)
+        allow_first_name_only = data.get('allow_first_name_only', True)
+        strict_mode = data.get('strict_mode', False)
+        
+        # Validate request
+        try:
+            screening_request = MatchRequest(
+                name=data.get('name', ''),
+                article_text=data.get('article_text', ''),
+                strict_mode=strict_mode
+            )
+        except ValidationError as e:
+            return jsonify({"error": "Invalid request", "details": str(e)}), 400
+        
+        # Create matcher with options
+        name_matcher = NameMatcher(allow_first_name_only_match=allow_first_name_only)
+        
+        # Extract entities from article
+        entities = entity_extractor.extract_entities(screening_request.article_text)
+        
+        if not entities:
+            return jsonify({
+                "match_found": False,
+                "message": "No person entities found in the article",
+                "entities": [],
+                "matches": [],
+                "status": "clear",
+                "symbol": "✓",
+                "color": "green"
+            })
+        
+        # Find matches
+        matches = []
+        best_match = None
+        best_confidence = 0.0
+        has_warnings = False
+        any_match = False
+        
+        for entity in entities:
+            result = name_matcher.match(
+                screening_request.name,
+                entity,
+                strict_mode=strict_mode,
+                use_llm=use_llm
+            )
+            
+            # Check for warnings in the result
+            entity_has_warnings = (
+                "WARNING" in result.final_decision_logic or 
+                "ANALYST REVIEW" in result.final_decision_logic or
+                any("WARNING" in exp.reasoning for exp in result.explanation)
+            )
+            
+            if result.is_match_recommendation:
+                any_match = True
+                if entity_has_warnings:
+                    has_warnings = True
+            
+            match_data = {
+                "entity": entity.text,
+                "entity_type": entity.label,
+                "confidence": result.match_confidence,
+                "is_match": result.is_match_recommendation,
+                "has_warnings": entity_has_warnings,
+                "explanation": [
+                    {
+                        "layer": exp.layer.value,
+                        "confidence": exp.confidence_score,
+                        "details": exp.reasoning,
+                        "has_warning": "WARNING" in exp.reasoning
+                    }
+                    for exp in result.explanation
+                ],
+                "final_decision": result.final_decision_logic,
+                "confidence_level": result.confidence_level.value
+            }
+            
+            matches.append(match_data)
+            
+            if result.match_confidence > best_confidence:
+                best_confidence = result.match_confidence
+                best_match = match_data
+        
+        # Determine overall status
+        if not any_match:
+            status = "clear"
+            symbol = "CLEAR"
+            color = "green"
+            message = "No matches found - CLEAR"
+        elif has_warnings:
+            status = "warning"
+            symbol = "WARNING"
+            color = "orange"
+            message = "Matches found with warnings - ANALYST REVIEW REQUIRED"
+        else:
+            status = "match"
+            symbol = "MATCH"
+            color = "red"
+            message = "Clean matches found - NO WARNINGS"
+        
+        # Prepare response
+        response = {
+            "match_found": any_match,
+            "has_warnings": has_warnings,
+            "status": status,
+            "symbol": symbol,
+            "color": color,
+            "message": message,
+            "best_match": best_match,
+            "all_matches": sorted(matches, key=lambda x: x['confidence'], reverse=True),
+            "entities_found": [{"text": e.text, "type": e.label} for e in entities],
+            "input_name": screening_request.name,
+            "threshold": 0.3,
+            "options_used": {
+                "use_llm": use_llm,
+                "allow_first_name_only": allow_first_name_only,
+                "strict_mode": strict_mode
+            }
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+
+@app.route("/api/test", methods=["GET"])
+def test_endpoint():
+    """Test endpoint to verify the API is working."""
+    return jsonify({
+        "status": "ok",
+        "message": "Name Screening API is running",
+        "version": "1.0.0"
+    })
+
+
+@app.route("/api/examples", methods=["GET"])
+def get_examples():
+    """Get example test cases."""
+    examples = [
+        {
+            "name": "Exact Match",
+            "input": "John Smith",
+            "article": "Local businessman John Smith announced a new venture today.",
+            "expected": "match"
+        },
+        {
+            "name": "Nickname Match",
+            "input": "William Johnson",
+            "article": "Bill Johnson won the election by a narrow margin.",
+            "expected": "match"
+        },
+        {
+            "name": "Name Order Variation",
+            "input": "Zhang Wei",
+            "article": "Ambassador Wei Zhang addressed the United Nations assembly.",
+            "expected": "match"
+        },
+        {
+            "name": "Different Person",
+            "input": "Sarah Johnson",
+            "article": "Michael Johnson broke the world record in the 400m sprint.",
+            "expected": "no_match"
+        },
+        {
+            "name": "Unicode Normalization",
+            "input": "José García",
+            "article": "CEO Jose Garcia announced record profits for the quarter.",
+            "expected": "match"
+        }
+    ]
+    return jsonify(examples)
+
+
+def find_available_port(start_port=5000, max_port=9999):
+    """Find an available port to run the server."""
+    import socket
+    for port in range(start_port, max_port + 1):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    return None
+
+
+def create_app():
+    """Create and configure the Flask app."""
+    # Ensure templates directory exists
+    templates_dir = Path(__file__).parent / "templates"
+    templates_dir.mkdir(exist_ok=True)
+    
+    # Create a basic template if it doesn't exist
+    index_path = templates_dir / "index.html"
+    if not index_path.exists():
+        create_default_template(index_path)
+    
+    return app
+
+
+def create_default_template(path: Path):
+    """Create a default HTML template."""
+    template = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Name Screening Tool</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #2c2c2c;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .main-container {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            height: 100vh;
+            gap: 1px;
+            background-color: #ffffff;
+        }
+        .left-panel {
+            background-color: #2c2c2c;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .right-panel {
+            background-color: #2c2c2c;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .section {
+            background-color: #2c2c2c;
+            padding: 20px;
+            border-bottom: 1px solid #ffffff;
+        }
+        .section:last-child {
+            border-bottom: none;
+        }
+        h1 {
+            color: #e0e0e0;
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #999;
+            margin: 0 0 20px 0;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        .secondary-button {
+            background-color: #555;
+        }
+        .secondary-button:hover {
+            background-color: #666;
+        }
+        .options-section {
+            background-color: #2c2c2c;
+            padding: 15px;
+            border-bottom: 1px solid #ffffff;
+        }
+        .checkbox-group {
+            margin: 8px 0;
+        }
+        .checkbox-group input {
+            margin-right: 8px;
+        }
+        .checkbox-group label {
+            display: inline;
+            font-weight: normal;
+            font-size: 14px;
+        }
+        .examples-section {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background-color: #2c2c2c;
+        }
+        .example-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .example-item:hover {
+            background-color: #333;
+            border-color: #0066cc;
+        }
+        .results-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .status-header {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .status-clear {
+            background-color: #1a3d1a;
+            border: 1px solid #2d5a2d;
+            color: #4CAF50;
+        }
+        .status-match {
+            background-color: #3d1a1a;
+            border: 1px solid #5a2d2d;
+            color: #f44336;
+        }
+        .status-warning {
+            background-color: #3d3d1a;
+            border: 1px solid #5a5a2d;
+            color: #ff9800;
+        }
+        .info-text {
+            color: #999;
+            font-size: 13px;
+            margin: 10px 0;
+        }
+        .entity-list {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #1a1a1a;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        .entity-item {
+            display: inline-block;
+            padding: 4px 10px;
+            margin: 4px;
+            background-color: #333;
+            border: 1px solid #555;
+            border-radius: 12px;
+            font-size: 13px;
+        }
+        .match-item {
+            margin: 15px 0;
+            padding: 15px;
+            background: #1a1a1a;
+            border-radius: 4px;
+            border: 1px solid #555;
+        }
+        .match-item.is-match {
+            border-color: #5a2d2d;
+        }
+        .match-item.has-warning {
+            border-color: #5a5a2d;
+        }
+        .match-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .confidence-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .confidence-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        .confidence-fill.warning {
+            background-color: #ff9800;
+        }
+        .confidence-fill.low {
+            background-color: #f44336;
+        }
+        .explanation-item {
+            margin: 8px 0;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 4px;
+            border-left: 3px solid #0066cc;
+            font-size: 13px;
+        }
+        .explanation-item.warning {
+            border-left-color: #ff9800;
+            background-color: #3d3d1a;
+        }
+        .layer-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            background-color: #0066cc;
+            color: white;
+            margin-right: 10px;
+        }
+        h3 {
+            margin-top: 0;
+            color: #e0e0e0;
+            font-size: 16px;
+        }
+        .no-results {
+            text-align: center;
+            color: #999;
+            padding: 40px;
+            font-size: 14px;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="section">
+                <h1>Name Screening Tool</h1>
+                <p class="subtitle">Screen names against article text for compliance</p>
+                
+                <div class="form-group">
+                    <label for="name">Name to Screen:</label>
+                    <input type="text" id="name" placeholder="e.g., John Smith" />
+                </div>
+                
+                <div class="form-group">
+                    <label for="article">Article Text:</label>
+                    <textarea id="article" placeholder="Paste the article text here..."></textarea>
+                </div>
+            </div>
+            
+            <div class="options-section">
+                <h3>Options</h3>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="strictMode" />
+                        Strict Mode
+                    </label>
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="useLlm" />
+                        Use LLM Enhancement
+                    </label>
+                </div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="allowFirstNameOnly" checked />
+                        Allow First Name Only Matches
+                    </label>
+                </div>
+            </div>
+            
+            <div class="section">
+                <button onclick="screenName()">Screen Name</button>
+                <button class="secondary-button" onclick="loadExample()">Load Example</button>
+                <button class="secondary-button" onclick="clearForm()">Clear</button>
+            </div>
+            
+            <div class="examples-section">
+                <h3>Example Test Cases</h3>
+                <div id="examplesList"></div>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="results-container" id="results">
+                <div class="no-results">
+                    Enter a name and article text, then click "Screen Name" to see results.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let examples = [];
+        
+        // Load examples on page load
+        window.onload = function() {
+            fetchExamples();
+        };
+        
+        function fetchExamples() {
+            fetch('/api/examples')
+                .then(response => response.json())
+                .then(data => {
+                    examples = data;
+                    displayExamples();
+                })
+                .catch(error => console.error('Error loading examples:', error));
+        }
+        
+        function displayExamples() {
+            const container = document.getElementById('examplesList');
+            container.innerHTML = examples.map((ex, idx) => `
+                <div class="example-item" onclick="selectExample(${idx})">
+                    <strong>${ex.name}</strong>: "${ex.input}" - ${ex.expected.replace('_', ' ')}
+                </div>
+            `).join('');
+        }
+        
+        function selectExample(index) {
+            const example = examples[index];
+            document.getElementById('name').value = example.input;
+            document.getElementById('article').value = example.article;
+        }
+        
+        function loadExample() {
+            if (examples.length > 0) {
+                const randomIdx = Math.floor(Math.random() * examples.length);
+                selectExample(randomIdx);
+            }
+        }
+        
+        function clearForm() {
+            document.getElementById('name').value = '';
+            document.getElementById('article').value = '';
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = `<div class="no-results">
+                Enter a name and article text, then click "Screen Name" to see results.
+            </div>`;
+        }
+        
+        async function screenName() {
+            const name = document.getElementById('name').value.trim();
+            const article = document.getElementById('article').value.trim();
+            const strictMode = document.getElementById('strictMode').checked;
+            const useLlm = document.getElementById('useLlm').checked;
+            const allowFirstNameOnly = document.getElementById('allowFirstNameOnly').checked;
+            
+            if (!name || !article) {
+                alert('Please enter both a name and article text');
+                return;
+            }
+            
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="no-results">Screening in progress...</div>';
+            
+            try {
+                const response = await fetch('/api/screen', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        article_text: article,
+                        strict_mode: strictMode,
+                        use_llm: useLlm,
+                        allow_first_name_only: allowFirstNameOnly
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Screening failed');
+                }
+                
+                displayResults(data);
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="no-results">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            let html = '';
+            
+            // Status header
+            html += `<div class="status-header status-${data.status}">
+                ${data.message}
+            </div>`;
+            
+            // Options used
+            html += '<p class="info-text">Options: ';
+            if (data.options_used.strict_mode) html += 'Strict Mode ';
+            if (data.options_used.use_llm) html += '| LLM Enhancement ';
+            if (!data.options_used.allow_first_name_only) html += '| No First-Name-Only ';
+            html += '</p>';
+            
+            // Show all entities found
+            if (data.entities_found && data.entities_found.length > 0) {
+                html += '<div class="entity-list">';
+                html += '<strong>Entities found in article:</strong><br>';
+                data.entities_found.forEach(entity => {
+                    html += `<span class="entity-item">${entity.text}</span>`;
+                });
+                html += '</div>';
+            } else {
+                html += '<p class="info-text">No person entities detected in the article text.</p>';
+            }
+            
+            // Show matches
+            if (data.all_matches && data.all_matches.length > 0) {
+                html += '<div style="margin-top: 20px;">';
+                html += '<h3>Match Results</h3>';
+                
+                data.all_matches.forEach(match => {
+                    const confidence = Math.round(match.confidence * 100);
+                    let matchClass = 'match-item';
+                    if (match.is_match) matchClass += ' is-match';
+                    if (match.has_warnings) matchClass += ' has-warning';
+                    
+                    html += `<div class="${matchClass}">`;
+                    html += `<div class="match-header">
+                        "${match.entity}" - ${match.is_match ? 'MATCH' : 'NO MATCH'} 
+                        ${match.has_warnings ? '(Warning)' : ''}
+                    </div>`;
+                    html += `<p><strong>Confidence:</strong> ${confidence}% (${match.confidence_level})</p>`;
+                    
+                    // Confidence bar
+                    let barClass = 'confidence-fill';
+                    if (match.has_warnings) barClass += ' warning';
+                    else if (confidence < 50) barClass += ' low';
+                    
+                    html += `<div class="confidence-bar">
+                        <div class="${barClass}" style="width: ${confidence}%"></div>
+                    </div>`;
+                    
+                    // Explanation
+                    if (match.explanation && match.explanation.length > 0) {
+                        html += '<div style="margin-top: 15px;"><strong>Explanation:</strong></div>';
+                        match.explanation.forEach(exp => {
+                            const expClass = exp.has_warning ? 'explanation-item warning' : 'explanation-item';
+                            html += `<div class="${expClass}">
+                                <span class="layer-badge">${exp.layer}</span>
+                                ${exp.details} (${Math.round(exp.confidence * 100)}% confidence)
+                            </div>`;
+                        });
+                    }
+                    
+                    // Final decision
+                    html += `<p style="margin-top: 15px;"><strong>Decision:</strong> ${match.final_decision}</p>`;
+                    
+                    html += '</div>';
+                });
+                
+                html += '</div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html>'''
+    
+    path.write_text(template)
+
+
+if __name__ == "__main__":
+    port = find_available_port()
+    if port:
+        print("Starting Name Screening Web App...")
+        print(f"Access at: http://localhost:{port}")
+        print("Press Ctrl+C to stop the server\n")
+        
+        app = create_app()
+        app.run(debug=True, host="0.0.0.0", port=port)
+    else:
+        print("Could not find an available port to run the server")
