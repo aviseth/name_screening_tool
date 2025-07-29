@@ -235,4 +235,3 @@ poetry run python -m spacy download en_core_web_sm
 
 - **Technical Implementation**: See [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)
 - **Evaluation Results**: See the second half of the Implementation Notes
-- **Automation Plan**: See [PART_2.md](PART_2.md)
