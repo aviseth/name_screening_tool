@@ -116,7 +116,8 @@ class EntityExtractor:
                     start_char=ent.start_char,
                     end_char=ent.end_char,
                     label=ent.label_,
-                    context=context
+                    context=context,
+                    source_text=text  # Pass full text for expanded context
                 )
                 entities.append(entity)
         
@@ -241,7 +242,8 @@ class EntityExtractor:
                     start_char=match.start(),
                     end_char=match.end(),
                     label='PERSON',
-                    context=self._extract_context(text, match.start(), match.end())
+                    context=self._extract_context(text, match.start(), match.end()),
+                    source_text=text
                 ))
         
         full_hyphenated_pattern = r'\b([A-Z][a-z]+(?:-[A-Z][a-z]+)+(?:\s+[A-Z][a-z]+)+)\b'
@@ -284,7 +286,8 @@ class EntityExtractor:
             start_char=start,
             end_char=end,
             label='PERSON',
-            context=self._extract_context(full_text, start, end)
+            context=self._extract_context(full_text, start, end),
+            source_text=full_text  # Pass full text for expanded context
         )
     
     def _merge_adjacent_proper_names(self, doc, seen_spans: set) -> List[ExtractedEntity]:
@@ -322,7 +325,8 @@ class EntityExtractor:
                                     start_char=start_char,
                                     end_char=end_char,
                                     label='PERSON',
-                                    context=self._extract_context(doc.text, start_char, end_char)
+                                    context=self._extract_context(doc.text, start_char, end_char),
+                                    source_text=doc.text
                                 ))
             else:
                 i += 1
@@ -355,7 +359,8 @@ class EntityExtractor:
                                 start_char=token1.idx,
                                 end_char=token1.idx + len(combined_text),
                                 label='PERSON',
-                                context=f"...{token1.text}... ...{token2.text}..."
+                                context=f"...{token1.text}... ...{token2.text}...",
+                                source_text=doc.text
                             ))
                             break
         

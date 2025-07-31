@@ -210,7 +210,8 @@ class NameMatcher:
                     confidence_level=traditional_result.confidence_level,
                     is_match_recommendation=traditional_result.is_match_recommendation,
                     explanation=enhanced_explanations,
-                    final_decision_logic=traditional_result.final_decision_logic
+                    final_decision_logic=traditional_result.final_decision_logic,
+                    contextual_role=None
                 )
         return traditional_result
     
@@ -753,5 +754,6 @@ class NameMatcher:
             confidence_level=confidence_level,
             is_match_recommendation=is_match,
             explanation=explanations,
-            final_decision_logic=final_logic
+            final_decision_logic=final_logic,
+            contextual_role=None
         )

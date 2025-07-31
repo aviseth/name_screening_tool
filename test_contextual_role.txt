@@ -1,0 +1,61 @@
+"""Test texts to demonstrate contextual role detection in name screening."""
+
+        {
+            "name": "David Smith",
+            "article": """
+                Breaking news: Financial executive John Roberts was charged with money laundering 
+                in a scheme that allegedly involved millions of dollars. When asked for comment, 
+                his colleague David Smith from the compliance department said, "We are shocked 
+                by these allegations and are cooperating fully with authorities." The investigation 
+                into Roberts began last year after suspicious transactions were flagged.
+            """,
+            "expected_role": "peripheral",
+            "description": "David Smith is just a colleague commenting on the situation"
+        },
+        {
+            "name": "David Smith", 
+            "article": """
+                Federal prosecutors have charged David Smith with orchestrating a complex 
+                money laundering operation that spanned three countries. Smith, who served 
+                as CEO of Global Finance Corp, allegedly used shell companies to hide 
+                illicit funds. The FBI arrested Smith at his Manhattan office yesterday.
+            """,
+            "expected_role": "subject",
+            "description": "David Smith is the subject of money laundering charges"
+        },
+        {
+            "name": "Maria Garcia",
+            "article": """
+                The fraud trial of tech mogul James Chen continued today with testimony from 
+                forensic accountant Maria Garcia. Garcia presented evidence showing irregularities 
+                in Chen's company books. "The patterns clearly indicate fraudulent activity," 
+                Garcia told the court. Chen faces up to 20 years if convicted.
+            """,
+            "expected_role": "peripheral", 
+            "description": "Maria Garcia is an expert witness, not the subject"
+        },
+        {
+            "name": "Robert Johnson",
+            "article": """
+                Investment advisor Robert Johnson was arrested Thursday on charges of running 
+                a Ponzi scheme that defrauded investors of $50 million. Johnson promised 
+                unrealistic returns and used new investor money to pay earlier investors. 
+                Victim Sarah Williams said "Johnson stole our life savings."
+            """,
+            "expected_role": "subject",
+            "description": "Robert Johnson is the subject of fraud charges"
+        },
+        {
+            "name": "Michael Brown",
+            "article": """
+                In the ongoing investigation into ABC Corp's accounting scandal, company 
+                spokesperson Michael Brown released a statement: "We are conducting an internal 
+                review and will take appropriate action." The scandal involves former CFO 
+                Janet Lee, who allegedly falsified financial reports for three years.
+            """,
+            "expected_role": "peripheral",
+            "description": "Michael Brown is a spokesperson, not involved in the scandal"
+        }
+    ]
+    
+   
