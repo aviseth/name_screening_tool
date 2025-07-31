@@ -165,7 +165,8 @@ class NameMatcher:
                         critical_warnings[warning_key] = True
                 
                 explanations.append(result)
-                if result.confidence_score >= self.HIGH_CONFIDENCE_THRESHOLD:
+                if result.confidence_score >= self.HIGH_CONFIDENCE_THRESHOLD and not use_llm:
+                    # Only return early if LLM enhancement is NOT requested
                     return self._create_match_result(
                         input_name, extracted_entity.text,
                         explanations, result.confidence_score

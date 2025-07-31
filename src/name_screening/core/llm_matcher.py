@@ -109,6 +109,11 @@ class LLMMatcher:
         """Analyze the match using LLM contextual understanding."""
 
         prompt = self._build_analysis_prompt(input_name, extracted_entity)
+        
+        # Debug log for James Chen issue
+        if "chen" in extracted_entity.text.lower() and "garcia" in input_name.lower():
+            logger.info(f"DEBUG: Analyzing {input_name} vs {extracted_entity.text}")
+            logger.info(f"DEBUG: First 200 chars of prompt: {prompt[:200]}...")
 
         try:
             response = self.client.generate_content(prompt)
@@ -188,24 +193,23 @@ class LLMMatcher:
         expanded_context = self._get_expanded_context(extracted_entity)
 
         return f"""You are an expert in name matching and contextual analysis for compliance screening. 
-Analyze TWO things:
 
-1. IDENTITY MATCH: Whether these names likely refer to the same person
-2. CONTEXTUAL ROLE: What role this person plays in the article (if they match)
+CRITICAL: You must compare these TWO SPECIFIC NAMES:
+- INPUT NAME TO SEARCH FOR: "{input_name}"
+- ENTITY FOUND IN ARTICLE: "{extracted_entity.text}"
 
-INPUT NAME: "{input_name}"
-ARTICLE ENTITY: "{extracted_entity.text}"
-IMPORTANT - EXPANDED ARTICLE CONTEXT: "{expanded_context}"
+ARE THESE TWO NAMES THE SAME PERSON? This is the primary question.
 
-For IDENTITY MATCHING, consider:
-- Different naming conventions and patterns
-- Common nicknames and abbreviations
-- Transliterations and spelling variations  
-- Name order differences (first-last vs last-first)
-- Professional titles and contexts
-- Initials and shortened forms
+EXPANDED ARTICLE CONTEXT: "{expanded_context}"
 
-For CONTEXTUAL ROLE, determine:
+Step 1 - IDENTITY MATCHING:
+First, determine if "{input_name}" and "{extracted_entity.text}" could be the same person.
+- If the names are completely different (e.g., "John Smith" vs "Maria Garcia"), they are NOT the same person
+- Consider variations like nicknames, initials, transliterations, name order
+- But fundamentally different names are different people
+
+Step 2 - CONTEXTUAL ROLE (only if names match):
+If and only if you determine the names match, then analyze the person's role:
 - Is this person the SUBJECT of negative news (accused, charged, investigated)?
 - Or are they PERIPHERAL (witness, commenter, colleague, victim, bystander)?
 - What is their relationship to the main issue in the article?
@@ -303,8 +307,10 @@ IMPORTANT: Focus on understanding the person's actual involvement. Someone merel
         role_confidence = contextual_role.get("role_confidence", 0.0)
 
         if llm_match and role_type == "peripheral" and negative_association is False:
-            llm_conf = llm_conf * 0.5
-            confidence_adjustment_reason = "Reduced confidence: peripheral mention only"
+            # Peripheral mentions should NOT be considered matches
+            llm_conf = 0.0
+            llm_match = False
+            confidence_adjustment_reason = "Not a match: peripheral mention only (not subject of negative news)"
         elif llm_match and role_type == "subject" and negative_association:
             llm_conf = min(llm_conf * 1.2, 1.0)
             confidence_adjustment_reason = (
@@ -313,16 +319,34 @@ IMPORTANT: Focus on understanding the person's actual involvement. Someone merel
         else:
             confidence_adjustment_reason = None
 
-        if llm_conf > 0.8 and traditional_conf < 0.3 and llm_match:
+        # CRITICAL: If LLM determined it's a peripheral mention, always reject the match
+        # regardless of traditional confidence
+        if role_type == "peripheral" and not negative_association:
+            logger.info(f"Forcing NO MATCH for peripheral mention: {input_name} vs {entity_text}")
+            logger.info(f"  Traditional conf: {traditional_conf}, LLM conf: {llm_conf}, LLM match: {llm_match}")
+            final_confidence = 0.0
+            is_match = False
+            confidence_level = MatchConfidenceLevel.NO_MATCH
+        elif llm_conf > 0.8 and traditional_conf < 0.3 and llm_match:
+            # LLM found a strong match that traditional matcher missed
+            logger.info(f"LLM override match: {input_name} vs {entity_text}")
             final_confidence = llm_conf
             is_match = True
             confidence_level = self._get_confidence_level(llm_conf)
         else:
-            final_confidence = max(traditional_conf, llm_conf if llm_match else 0)
-            is_match = traditional_result.is_match_recommendation or (
-                llm_match and llm_conf > 0.5
-            )
-            confidence_level = self._get_confidence_level(final_confidence)
+            # Standard combination of traditional and LLM results
+            # BUT STILL CHECK FOR PERIPHERAL MENTIONS
+            if role_type == "peripheral" and not negative_association:
+                logger.info(f"Forcing NO MATCH for peripheral mention (else branch): {input_name} vs {entity_text}")
+                final_confidence = 0.0
+                is_match = False
+                confidence_level = MatchConfidenceLevel.NO_MATCH
+            else:
+                final_confidence = max(traditional_conf, llm_conf if llm_match else 0)
+                is_match = traditional_result.is_match_recommendation or (
+                    llm_match and llm_conf > 0.5
+                )
+                confidence_level = self._get_confidence_level(final_confidence)
 
         llm_explanation = self.explainer.generate_explanation(
             MatchingLayer.LLM_ENHANCED,
@@ -369,8 +393,8 @@ IMPORTANT: Focus on understanding the person's actual involvement. Someone merel
         if role_type != "unknown":
             role_desc = contextual_role.get("role_description", role_type)
             decision_parts.append(f"Role: {role_desc}")
-            if role_type == "peripheral":
-                decision_parts.append("PERIPHERAL MENTION")
+            if role_type == "peripheral" and not negative_association:
+                decision_parts.append("PERIPHERAL MENTION - NOT A MATCH")
             elif role_type == "subject" and negative_association:
                 decision_parts.append("SUBJECT OF CONCERN")
 
@@ -380,6 +404,11 @@ IMPORTANT: Focus on understanding the person's actual involvement. Someone merel
         decision_parts.append(f"Decision: {'MATCH' if is_match else 'NO MATCH'}")
         decision_logic = " | ".join(decision_parts)
 
+        # Log the final decision for debugging
+        if role_type == "peripheral":
+            logger.info(f"Peripheral mention detected for {input_name}: is_match={is_match}")
+            logger.info(f"  Final values: confidence={final_confidence}, level={confidence_level.value}")
+        
         return MatchResult(
             input_name=input_name,
             article_entity=entity_text,
