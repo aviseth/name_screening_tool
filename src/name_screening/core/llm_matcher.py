@@ -210,9 +210,14 @@ First, determine if "{input_name}" and "{extracted_entity.text}" could be the sa
 
 Step 2 - CONTEXTUAL ROLE (only if names match):
 If and only if you determine the names match, then analyze the person's role:
-- Is this person the SUBJECT of negative news (accused, charged, investigated)?
-- Or are they PERIPHERAL (witness, commenter, colleague, victim, bystander)?
-- What is their relationship to the main issue in the article?
+- SUBJECT of negative news: Person who is accused, charged, investigated, arrested, convicted, or alleged to have done something wrong
+- PERIPHERAL: Anyone else including:
+  - Victims of crimes or fraud
+  - Witnesses testifying
+  - Experts providing commentary
+  - Lawyers, accountants, or other professionals
+  - Colleagues, family members, or associates
+  - Anyone quoted or mentioned who is NOT accused of wrongdoing
 
 Provide your analysis as JSON:
 {{
@@ -224,14 +229,18 @@ Provide your analysis as JSON:
   "context_clues": ["relevant", "context", "information"],
   "contextual_role": {{
     "role_type": "subject|peripheral|unknown",
-    "role_description": "specific role (e.g., 'accused of fraud', 'witness', 'CEO commenting')",
-    "negative_association": true/false,
-    "risk_indicators": ["charged with", "accused of", "investigated for", etc.],
+    "role_description": "specific role (e.g., 'accused of fraud', 'victim', 'witness', 'expert commenting')",
+    "negative_association": true/false (true only if person is accused/charged/investigated),
+    "risk_indicators": ["charged with", "accused of", "investigated for", etc.] (empty if peripheral),
     "role_confidence": 0.0-1.0
   }}
 }}
 
-IMPORTANT: Focus on understanding the person's actual involvement. Someone merely commenting on a situation should be marked as 'peripheral' even if the article is about serious crimes."""
+IMPORTANT: 
+- Focus on understanding the person's actual involvement
+- Victims should ALWAYS be marked as 'peripheral' with negative_association=false
+- Only mark someone as 'subject' if they are the one accused of wrongdoing
+- Anyone not directly accused/charged/investigated should be 'peripheral'"""
 
     def _parse_text_response(self, response_text: str) -> Dict[str, Any]:
         """Parse text response when JSON parsing fails."""
