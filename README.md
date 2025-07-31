@@ -233,5 +233,6 @@ poetry run python -m spacy download en_core_web_sm
 
 ## Documentation
 
+- **Comprehensive Technical Documentation**: See [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) - Complete guide covering all functions, files, and design decisions
 - **Technical Implementation**: See [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)
 - **Evaluation Results**: See the second half of the Implementation Notes

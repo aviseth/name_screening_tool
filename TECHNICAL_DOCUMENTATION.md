@@ -1021,6 +1021,96 @@ critical_warnings = {
 
 ---
 
+---
+
+## Quick Reference
+
+### File Summary
+| File | Lines | Purpose |
+|------|-------|---------|
+| `main.py` | 285 | CLI interface and application entry point |
+| `core/matcher.py` | 756 | Core matching engine with confidence cascade |
+| `core/entity_extractor.py` | 414 | spaCy-based entity extraction |
+| `core/llm_matcher.py` | 275 | Optional LLM enhancement via Gemini |
+| `utils/name_parser.py` | 169 | Name normalization and parsing |
+| `utils/explainability.py` | 232 | Decision documentation for compliance |
+| `models/matching.py` | 117 | Pydantic data models and validation |
+| `web_app.py` | 762 | Flask web interface |
+| `evaluate.py` | 566 | Core test suite |
+| `evaluate_extended.py` | 666 | Extended test scenarios |
+
+### Key Functions by Component
+
+#### Core Matching (`matcher.py`)
+- `match()`: Main matching orchestrator
+- `_exact_match()`: Perfect normalization-based matching
+- `_nickname_match()`: Cultural nickname resolution
+- `_structural_match()`: Pattern-based matching (initials, reordering)
+- `_fuzzy_match()`: Typo and misspelling handling
+- `_phonetic_match()`: Sound-alike matching
+
+#### Entity Extraction (`entity_extractor.py`)
+- `extract_entities()`: Main NLP entity extraction
+- `_extract_additional_patterns()`: Custom pattern enhancement
+- `_merge_adjacent_proper_names()`: Entity consolidation
+- `_load_model()`: Smart spaCy model selection
+
+#### LLM Enhancement (`llm_matcher.py`)
+- `enhance_match()`: Contextual analysis via Gemini
+- `_build_prompt()`: Structured prompt construction
+- `_parse_llm_response()`: Response parsing and validation
+
+#### Name Processing (`name_parser.py`)
+- `parse()`: Main normalization pipeline
+- `normalize_name()`: Public normalization API
+- `_handle_cultural_patterns()`: Global naming conventions
+
+#### Explainability (`explainability.py`)
+- `generate_explanation()`: Audit trail creation
+- `_generate_reasoning()`: Human-readable explanations
+- `_determine_confidence_level()`: Categorical confidence mapping
+
+### Configuration Files
+- `pyproject.toml`: Poetry dependency management
+- `data/nicknames.csv`: Cultural nickname database
+- `.env`: API keys and environment variables
+- `setup.py`: spaCy model installation
+
+### Command Line Usage
+```bash
+# Basic matching
+poetry run name_screening match --name "John Smith" --article-file article.txt
+
+# JSON output for automation
+poetry run name_screening match --name "John Smith" --article-text "..." --output json
+
+# High-security mode (disable first-name-only matches)
+poetry run name_screening match --name "John Smith" --article-file article.txt --no-first-name-only
+
+# LLM enhancement
+poetry run name_screening match --name "John Smith" --article-file article.txt --use-llm
+
+# Web interface
+poetry run python web_app.py
+```
+
+### Testing Commands
+```bash
+# Quick test
+poetry run name_screening test
+
+# Core evaluation
+poetry run python evaluate.py
+
+# Extended evaluation
+poetry run python evaluate_extended.py
+
+# LLM evaluation
+poetry run python evaluate.py --use-llm
+```
+
+---
+
 ## Conclusion
 
 The Name Screening Tool represents a comprehensive solution to the adverse media screening challenge in financial compliance. Its architecture prioritizes recall over precision while providing the explainability and configurability required for regulatory environments.
